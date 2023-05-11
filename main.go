@@ -37,6 +37,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 	defer r.Close()
 	defer w.Close()
 	defer srtConnection.Close()
+	log.Printf("Staring  forwarder\n")
 
 	go func() {
 		defer srtConnection.Close()
@@ -47,6 +48,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 			if err != nil {
 				break
 			}
+			log.Printf("Read frame , length = %d\n", n)
 
 			if _, err := w.Write(inboundMpegTsPacket[:n]); err != nil {
 				break
@@ -60,6 +62,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 	for {
 		d, err := dmx.NextData()
 		if err != nil {
+			log.Printf("failed to find next frame because %s \n", err)
 			break
 		}
 
@@ -92,18 +95,24 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 				}
 			}
 		}
-
+		//log.Printf("Got frame , pid = %d\n", d.PID)
 		if d.PID == h264PID && d.PES != nil {
-			if err = videoTrack.WriteSample(media.Sample{Data: d.PES.Data, Duration: time.Second / 30}); err != nil {
+			log.Printf("Sending frame , length = %d\n", len(d.PES.Data))
+
+			err = videoTrack.WriteSample(media.Sample{Data: d.PES.Data, Duration: time.Second / 30})
+			if err != nil {
+				log.Printf("cant write frame of length %d \n", len(d.PES.Data))
 				break
 			}
 			captions, err := eia608Reader.Parse(d.PES)
 			if err != nil {
+				log.Printf("cant parse frame of length %d \n", len(d.PES.Data))
 				break
 			}
 			if captions != "" {
 				captionsMsg, err := eia608.BuildCaptionsMessage(d.PES.Header.OptionalHeader.PTS, captions)
 				if err != nil {
+					log.Printf("cant caption frame of length %d \n", len(d.PES.Data))
 					break
 				}
 				metadataTrack.SendText(captionsMsg)

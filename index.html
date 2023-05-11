@@ -2,7 +2,9 @@
 
 <head>
   <title>donut</title>
-  <script type="module" src="https://unpkg.com/donut-video-element@0.0.3"></script>
+  <script>
+
+  </script>
 </head>
 
 <body>
@@ -16,30 +18,95 @@
   <input type="text" id="srt-stream-id" /> <br />
   <button onclick="onConnect()"> Connect </button>
 
-  <donut-video server="http://localhost:8080" controls />
+  <video server="http://localhost:8080" controls />
 </body>
 
 <script>
-  function docReady(fn) {
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-      setTimeout(fn, 1);
-    } else {
-      document.addEventListener("DOMContentLoaded", fn);
-    }
+  var connected = false;
+  var videoElement;
+  var metadataTrack;
+  var currentCue;
+
+  function buildPayload(host,port,streamId,offer) {
+    let ret = JSON.stringify({srtHost: host, srtPort: port, srtStreamId: streamId, offer: offer});
+    console.log("message is "+ret);
+    return ret;
   }
 
-  docReady(function () {
+  async function fetchRemoteDescription(host,port,streamId,offer) {
+    return fetch("/doSignaling", {
+      method: "post",
+      headers: {Accept: "application/json, text/plain, */*", "Content-Type": "application/json"},
+      body:  buildPayload(host,port,streamId,offer)
+    }).then(t => {
+      if (200 === t.status) return t.json();
+      t.text().then(t => {
+        window.alert(t)
+      })
+    })
+  }
+
+  function displayCue(t) {
+    let e = videoElement.currentTime, n = new VTTCue(e, e + 100, t.Text);
+    null !== currentCue &&  metadataTrack.removeCue( currentCue),  metadataTrack.addCue(n),  currentCue = n
+  }
+  function waitToCompleteIceGathering(pc) {
+    return new Promise((resolve) => {
+      pc.addEventListener(
+              "icegatheringstatechange",
+              (e) =>
+                      e.target.iceGatheringState === "complete" &&
+                      resolve(pc.localDescription)
+      );
+    });
+  }
+  async function connect(host,port,streamId) {
+    let peerConnection = new RTCPeerConnection(
+            {iceServers: [{urls: "stun:stun4.l.google.com:19302"}], bundlePolicy: "max-bundle", iceCandidatePoolSize: 5});
+    peerConnection.addTransceiver("video", {direction: "recvonly"});
+    let dataChannel = peerConnection.createDataChannel("test");
+    peerConnection.ontrack = t => {
+      videoElement.srcObject = t.streams[0]
+      connected = !0
+    }
+    peerConnection.ondatachannel = ev => {
+      metadataTrack =  videoElement.addTextTrack("captions", "608/708", "en");
+      metadataTrack.mode = "showing";
+      ev.channel.onmessage = mev => {
+        let e = JSON.parse(mev.data);
+        "captions" == e.Type ?  displayCue(e) :  console.log(mev.data)
+      }
+    }
+
+    let offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    offer = await waitToCompleteIceGathering(peerConnection);
+    let answer = await fetchRemoteDescription(host,port,streamId,offer);
+    await  peerConnection.setRemoteDescription(answer);
+  }
+
+
+  function displayCue(t) {
+    let e = videoElement.currentTime;
+    let n = new VTTCue(e, e + 100, t.Text);
+    null !== currentCue && metadataTrack.removeCue(currentCue), metadataTrack.addCue(n), currentCue = n
+  }
+  // Alternative to load event
+  document.onreadystatechange = () => {
+    if (document.readyState === "complete") {
+      initApplication();
+    }
+  };
+  function initApplication() {
     const queryString = window.location.search;
     const urlParams = new URLSearchParams(queryString);
-    const player = document.querySelectorAll('donut-video')[0];
-
+    const player = document.querySelectorAll('video')[0];
+    videoElement = player;
     window.onConnect = () => {
       let srtHost = document.getElementById('srt-host').value;
       let srtPort = document.getElementById('srt-port').value;
       let srtStreamId = document.getElementById('srt-stream-id').value;
-
-      let src = 'srt://' + srtHost + ':' + srtPort + '/' + srtStreamId;
-      player.src = src;
+      connect(srtHost,srtPort,srtStreamId);
       player.play();
     }
 
@@ -56,7 +123,7 @@
     if (urlParams.get('autoplay') === "true") {
       onConnect();
     }
-  });
+  }
 </script>
 
 </html>
