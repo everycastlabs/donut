@@ -23,7 +23,7 @@ func NewWHIPClient(endpoint string, token string) *WHIPClient {
 	return client
 }
 
-func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) {
+func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *webrtc.TrackLocalStaticSample {
 
 	log.Printf("new PeerConnection \n")
 
@@ -37,13 +37,13 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) {
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "whipnut")
 	if err != nil {
 		log.Println("Cant make track, ", err)
-		return
+		return nil
 	}
 	log.Printf("add VideoTrack \n")
 
 	if _, err := pc.AddTrack(videoTrack); err != nil {
 		log.Println("Cant add track, ", err)
-		return
+		return nil
 	}
 
 	pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
@@ -124,7 +124,7 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) {
 	} else {
 		log.Printf("set answer ok \n")
 	}
-
+	return videoTrack
 }
 
 func (whip *WHIPClient) Close(skipTlsAuth bool) {

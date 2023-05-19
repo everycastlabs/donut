@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/flavioribeiro/donut/eia608"
@@ -31,12 +32,19 @@ var (
 	enableICEMux                = false
 )
 
+type SRTOffer struct {
+	SRTHost     string
+	SRTPort     string
+	SRTStreamID string
+	Offer       webrtc.SessionDescription
+}
+
 func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLocalStaticSample, metadataTrack *webrtc.DataChannel) {
 	r, w := io.Pipe()
 	defer r.Close()
 	defer w.Close()
 	defer srtConnection.Close()
-	log.Printf("Staring  forwarder\n")
+	log.Printf("Starting  forwarder\n")
 
 	go func() {
 		defer srtConnection.Close()
@@ -47,8 +55,6 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 			if err != nil {
 				break
 			}
-			log.Printf("Read frame , length = %d\n", n)
-
 			if _, err := w.Write(inboundMpegTsPacket[:n]); err != nil {
 				break
 			}
@@ -65,7 +71,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 			break
 		}
 
-		if d.PMT != nil && metadataTrack != nil {
+		if d.PMT != nil {
 			for _, es := range d.PMT.ElementaryStreams {
 				msg, _ := json.Marshal(struct {
 					Type    string
@@ -74,7 +80,9 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 					Type:    "metadata",
 					Message: es.StreamType.String(),
 				})
-				metadataTrack.SendText(string(msg))
+				if metadataTrack != nil {
+					metadataTrack.SendText(string(msg))
+				}
 				if es.StreamType == astits.StreamTypeH264Video {
 					h264PID = es.ElementaryPID
 				}
@@ -90,13 +98,17 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 						Type:    "metadata",
 						Message: fmt.Sprintf("Bitrate %.2fMbps", bitrateInMbitsPerSecond),
 					})
-					metadataTrack.SendText(string(msg))
+					if metadataTrack != nil {
+
+						metadataTrack.SendText(string(msg))
+					} else {
+						log.Println("msg ", string(msg))
+					}
 				}
 			}
 		}
 		//log.Printf("Got frame , pid = %d\n", d.PID)
 		if d.PID == h264PID && d.PES != nil {
-			log.Printf("Sending frame , length = %d\n", len(d.PES.Data))
 
 			err = videoTrack.WriteSample(media.Sample{Data: d.PES.Data, Duration: time.Second / 30})
 			if err != nil {
@@ -132,12 +144,7 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	offer := struct {
-		SRTHost     string
-		SRTPort     string
-		SRTStreamID string
-		Offer       webrtc.SessionDescription
-	}{"", "", "", webrtc.SessionDescription{}}
+	offer := SRTOffer{"", "", "", webrtc.SessionDescription{}}
 
 	if err = json.NewDecoder(r.Body).Decode(&offer); err != nil {
 		errorToHTTP(w, err)
@@ -227,8 +234,54 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 func doWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	// start by doing the whip side - so we are _ready_ when srt sends the first frame.
 	whip := NewWHIPClient(whipUri, token)
-	whip.Publish(a, peerConnectionConfiguration)
+	videoTrack := whip.Publish(a, peerConnectionConfiguration)
+	offer := parseToOffer(srtUri)
+	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
+	log.Println("Connecting to SRT ", offer.SRTHost, srtPort, offer.SRTStreamID)
 
+	srtConnection, err := astisrt.Dial(astisrt.DialOptions{
+		ConnectionOptions: []astisrt.ConnectionOption{
+			astisrt.WithLatency(300),
+			astisrt.WithStreamid(offer.SRTStreamID),
+		},
+
+		// Callback when the connection is disconnected
+		OnDisconnect: func(c *astisrt.Connection, err error) { log.Fatal("Disconnected from SRT") },
+
+		Host: offer.SRTHost,
+		Port: uint16(srtPort),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Connected to SRT")
+
+	srtToWebRTC(srtConnection, videoTrack, nil)
+
+}
+
+func parseToOffer(s string) SRTOffer {
+	streamId := ""
+	u, err := url.Parse(s)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(u.Scheme)
+
+	host, port, _ := net.SplitHostPort(u.Host)
+	fmt.Println(host)
+	fmt.Println(port)
+
+	m, _ := url.ParseQuery(u.RawQuery)
+	streamIds := m["streamid"]
+	if streamIds != nil && len(streamIds) > 0 {
+		streamId = streamIds[0]
+	}
+	return SRTOffer{
+		SRTHost:     host,
+		SRTPort:     port,
+		SRTStreamID: streamId,
+	}
 }
 
 func main() {
@@ -279,7 +332,6 @@ func main() {
 	if len(*whipUri) > 0 && len(*srtUri) > 0 {
 		token := flag.String("whip-token", "", "bearer token for whip")
 		log.Println("WHIP mode - sending %s to %s \n ", whipUri, srtUri)
-
 		doWhip(*whipUri, *srtUri, *token, api)
 	} else {
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
