@@ -25,11 +25,10 @@ import (
 
 var (
 	//go:embed index.html
-	indexHTML string
-
-	api *webrtc.API //nolint
-
-	enableICEMux = false
+	indexHTML                   string
+	api                         *webrtc.API //nolint
+	peerConnectionConfiguration = webrtc.Configuration{}
+	enableICEMux                = false
 )
 
 func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLocalStaticSample, metadataTrack *webrtc.DataChannel) {
@@ -66,7 +65,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 			break
 		}
 
-		if d.PMT != nil {
+		if d.PMT != nil && metadataTrack != nil {
 			for _, es := range d.PMT.ElementaryStreams {
 				msg, _ := json.Marshal(struct {
 					Type    string
@@ -109,7 +108,7 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 				log.Printf("cant parse frame of length %d \n", len(d.PES.Data))
 				break
 			}
-			if captions != "" {
+			if captions != "" && metadataTrack != nil {
 				captionsMsg, err := eia608.BuildCaptionsMessage(d.PES.Header.OptionalHeader.PTS, captions)
 				if err != nil {
 					log.Printf("cant caption frame of length %d \n", len(d.PES.Data))
@@ -121,22 +120,10 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 	}
 
 }
-
 func doSignaling(w http.ResponseWriter, r *http.Request) {
 	setCors(w, r)
 	if r.Method != http.MethodPost {
 		return
-	}
-
-	peerConnectionConfiguration := webrtc.Configuration{}
-	if !enableICEMux {
-		peerConnectionConfiguration.ICEServers = []webrtc.ICEServer{
-			{
-				URLs: []string{
-					"stun:stun4.l.google.com:19302",
-				},
-			},
-		}
 	}
 
 	peerConnection, err := api.NewPeerConnection(peerConnectionConfiguration)
@@ -237,7 +224,17 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func doWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
+	// start by doing the whip side - so we are _ready_ when srt sends the first frame.
+	whip := NewWHIPClient(whipUri, token)
+	whip.Publish(a, peerConnectionConfiguration)
+
+}
+
 func main() {
+	whipUri := flag.String("whip-uri", "", "whip URI to send stream to")
+	srtUri := flag.String("srt-uri", "", "srt URI to use")
+
 	flag.BoolVar(&enableICEMux, "enable-ice-mux", false, "Enable ICE Mux on :8081")
 	flag.Parse()
 
@@ -269,13 +266,29 @@ func main() {
 		settingEngine.SetICEUDPMux(webrtc.NewICEUDPMux(nil, udpListener))
 	}
 	api = webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine), webrtc.WithMediaEngine(mediaEngine))
+	peerConnectionConfiguration = webrtc.Configuration{}
+	if !enableICEMux {
+		peerConnectionConfiguration.ICEServers = []webrtc.ICEServer{
+			{
+				URLs: []string{
+					"stun:stun4.l.google.com:19302",
+				},
+			},
+		}
+	}
+	if len(*whipUri) > 0 && len(*srtUri) > 0 {
+		token := flag.String("whip-token", "", "bearer token for whip")
+		log.Println("WHIP mode - sending %s to %s \n ", whipUri, srtUri)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte(indexHTML))
-	})
-	http.HandleFunc("/doSignaling", doSignaling)
+		doWhip(*whipUri, *srtUri, *token, api)
+	} else {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte(indexHTML))
+		})
+		http.HandleFunc("/doSignaling", doSignaling)
 
-	log.Println("Open http://localhost:8080 to access this demo")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Println("Open http://localhost:8080 to access this demo")
+		log.Fatal(http.ListenAndServe(":8080", nil))
+	}
 }
