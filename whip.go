@@ -54,7 +54,6 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *
 	if err != nil {
 		log.Fatal("PeerConnection could not create offer. ", err)
 	}
-	log.Printf("create offer  %s \n", offer.SDP)
 
 	err = pc.SetLocalDescription(offer)
 	if err != nil {
@@ -67,8 +66,6 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	<-gatherComplete
 	log.Printf("gather completed \n")
-
-	log.Println(pc.LocalDescription().SDP)
 
 	var sdp = []byte(pc.LocalDescription().SDP)
 	client := &http.Client{
@@ -97,8 +94,6 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *
 
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
-
-	log.Println(string(body))
 
 	if resp.StatusCode != 201 {
 		log.Fatalf("Non Successful POST: %d", resp.StatusCode)

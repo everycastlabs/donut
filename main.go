@@ -99,7 +99,6 @@ func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLoca
 						Message: fmt.Sprintf("Bitrate %.2fMbps", bitrateInMbitsPerSecond),
 					})
 					if metadataTrack != nil {
-
 						metadataTrack.SendText(string(msg))
 					} else {
 						log.Println("msg ", string(msg))
@@ -231,6 +230,37 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
+	offer := parseToOffer(srtUri)
+	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
+	hand := astisrt.ServerHandlerFunc(func(c *astisrt.Connection) {
+		log.Println(" got new SRT on", offer.SRTHost, srtPort, offer.SRTStreamID)
+		whip := NewWHIPClient(whipUri, token)
+		videoTrack := whip.Publish(a, peerConnectionConfiguration)
+		srtToWebRTC(c, videoTrack, nil)
+	})
+	serv, err := astisrt.NewServer(
+		astisrt.ServerOptions{
+			ConnectionOptions: []astisrt.ConnectionOption{
+				astisrt.WithLatency(300),
+				astisrt.WithStreamid(offer.SRTStreamID),
+			},
+			Handler:        hand,
+			OnBeforeAccept: nil,
+			Host:           offer.SRTHost,
+			Port:           uint16(srtPort),
+		})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Listening for SRT")
+	err = serv.ListenAndServe(5)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(" Done Listening for SRT")
+}
+
 func doWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	// start by doing the whip side - so we are _ready_ when srt sends the first frame.
 	whip := NewWHIPClient(whipUri, token)
@@ -266,12 +296,10 @@ func parseToOffer(s string) SRTOffer {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(u.Scheme)
-
+	if u.Scheme != "srt" {
+		log.Fatal("uri must scheme must be srt:")
+	}
 	host, port, _ := net.SplitHostPort(u.Host)
-	fmt.Println(host)
-	fmt.Println(port)
-
 	m, _ := url.ParseQuery(u.RawQuery)
 	streamIds := m["streamid"]
 	if streamIds != nil && len(streamIds) > 0 {
@@ -331,8 +359,8 @@ func main() {
 	}
 	if len(*whipUri) > 0 && len(*srtUri) > 0 {
 		token := flag.String("whip-token", "", "bearer token for whip")
-		log.Println("WHIP mode - sending %s to %s \n ", whipUri, srtUri)
-		doWhip(*whipUri, *srtUri, *token, api)
+		log.Printf("WHIP mode - sending %s to %s \n ", *whipUri, *srtUri)
+		listenAndWhip(*whipUri, *srtUri, *token, api)
 	} else {
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(200)

@@ -50,4 +50,11 @@ on k4
 sends to it.
 
 -----
-plan is to take whip logic from whip-go and put it into donut (as a mode?) so it can send to galene
+
+Integrated so that :
+
+./donut -whip-uri https://galene.pi.pe/group/whip/ -srt-uri "srt://0.0.0.0:5000?streamid=test"
+
+ffmpeg -f video4linux2 -input_format h264 -video_size 1280x720 -framerate 30 -i /dev/video0 -vcodec copy -an -f mpegts srt://192.168.178.60:5000
+
+sends srt via whip to galene
