@@ -14,6 +14,7 @@ type WHIPClient struct {
 	endpoint    string
 	token       string
 	resourceUrl string
+	pc          *webrtc.PeerConnection
 }
 
 func NewWHIPClient(endpoint string, token string) *WHIPClient {
@@ -32,7 +33,7 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration, s
 		log.Fatal("Unexpected error building the PeerConnection. ", err)
 	}
 	log.Printf("new VideoTrack \n")
-
+	whip.pc = pc
 	// Create a video track
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", sid)
 	if err != nil {
@@ -136,8 +137,11 @@ func (whip *WHIPClient) Close(skipTlsAuth bool) {
 			},
 		},
 	}
+	log.Printf("Closing a whip client \n")
+
 	_, err = client.Do(req)
 	if err != nil {
 		log.Fatal("Failed http DELETE request. ", err)
 	}
+	whip.pc.Close()
 }

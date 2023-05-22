@@ -14,6 +14,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/flavioribeiro/donut/eia608"
@@ -238,13 +241,28 @@ func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 		sid, _ := c.Options().Streamid()
 		whip := NewWHIPClient(whipUri, token)
 		videoTrack := whip.Publish(a, peerConnectionConfiguration, sid)
+
+		ticker := time.NewTicker(20 * time.Second)
+		go func() {
+			for range ticker.C {
+				s, err := c.Stats(true, true)
+				b := s.ByteRecvUnique()
+				if b == 0 || err != nil {
+					log.Printf("timeout on  %s\n", sid)
+					c.Close()
+					whip.Close(true)
+					ticker.Stop()
+				}
+			}
+		}()
 		srtToWebRTC(c, videoTrack, nil)
+		whip.Close(true)
 	})
 	serv, err := astisrt.NewServer(
 		astisrt.ServerOptions{
 			ConnectionOptions: []astisrt.ConnectionOption{
-				astisrt.WithLatency(300),
 				astisrt.WithStreamid(offer.SRTStreamID),
+				astisrt.WithTranstype(astisrt.TranstypeLive),
 			},
 			Handler:        hand,
 			OnBeforeAccept: nil,
@@ -254,6 +272,18 @@ func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		fmt.Println(" got interrupt signal: ", <-sigChan)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// Shutdown
+		log.Println("main: shutting down")
+		if err = serv.Shutdown(ctx); err != nil {
+			log.Println(fmt.Errorf("main: shutting down failed: %w", err))
+		}
+	}()
 	log.Println("Listening for SRT")
 	err = serv.ListenAndServe(5)
 	if err != nil {
