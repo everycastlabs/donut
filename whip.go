@@ -23,7 +23,7 @@ func NewWHIPClient(endpoint string, token string) *WHIPClient {
 	return client
 }
 
-func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *webrtc.TrackLocalStaticSample {
+func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration, sid string) *webrtc.TrackLocalStaticSample {
 
 	log.Printf("new PeerConnection \n")
 
@@ -34,7 +34,7 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration) *
 	log.Printf("new VideoTrack \n")
 
 	// Create a video track
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "whipnut")
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", sid)
 	if err != nil {
 		log.Println("Cant make track, ", err)
 		return nil

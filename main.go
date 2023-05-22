@@ -235,8 +235,9 @@ func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
 	hand := astisrt.ServerHandlerFunc(func(c *astisrt.Connection) {
 		log.Println(" got new SRT on", offer.SRTHost, srtPort, offer.SRTStreamID)
+		sid, _ := c.Options().Streamid()
 		whip := NewWHIPClient(whipUri, token)
-		videoTrack := whip.Publish(a, peerConnectionConfiguration)
+		videoTrack := whip.Publish(a, peerConnectionConfiguration, sid)
 		srtToWebRTC(c, videoTrack, nil)
 	})
 	serv, err := astisrt.NewServer(
@@ -264,7 +265,7 @@ func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 func doWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	// start by doing the whip side - so we are _ready_ when srt sends the first frame.
 	whip := NewWHIPClient(whipUri, token)
-	videoTrack := whip.Publish(a, peerConnectionConfiguration)
+	videoTrack := whip.Publish(a, peerConnectionConfiguration, "whipnut")
 	offer := parseToOffer(srtUri)
 	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
 	log.Println("Connecting to SRT ", offer.SRTHost, srtPort, offer.SRTStreamID)

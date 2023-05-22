@@ -2,6 +2,9 @@
 <img src="https://user-images.githubusercontent.com/244265/200068510-7c24d5c7-6ba0-44ee-8e60-0f157f990b90.png" width="350" />
 
 donut is a zero setup required SRT+MPEG-TS -> WebRTC Bridge powered by [Pion](http://pion.ly/).
+This fork operates in 2 possible modes:
+1) as a viewer - providing a browser compatible endpoint for a single SRT stream. - useful for previews and testing.
+2) as a bridge - providing a protocol translator to WHIP  - useful for feeding SRT into SFUs or broadcast fanout systems
 
 ### Install & Run Locally
 
