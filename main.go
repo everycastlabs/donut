@@ -390,7 +390,7 @@ func main() {
 	}
 	if len(*whipUri) > 0 && len(*srtUri) > 0 {
 		token := flag.String("whip-token", "", "bearer token for whip")
-		log.Printf("WHIP mode - sending %s to %s \n ", *whipUri, *srtUri)
+		log.Printf("WHIP mode - sending %s to %s \n ", *srtUri, *whipUri)
 		listenAndWhip(*whipUri, *srtUri, *token, api)
 	} else {
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
