@@ -1,4 +1,4 @@
-module github.com/flavioribeiro/donut
+module github.com/everycastlabs/donut
 
 go 1.19
 

@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flavioribeiro/donut/eia608"
+	"github.com/everycastlabs/donut/eia608"
 
 	astisrt "github.com/asticode/go-astisrt/pkg"
 	"github.com/asticode/go-astits"

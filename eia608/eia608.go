@@ -3,7 +3,7 @@ package eia608
 import (
 	"encoding/json"
 
-	"github.com/flavioribeiro/donut/h264"
+	"github.com/everycastlabs/donut/h264"
 
 	"github.com/asticode/go-astits"
 	gocaption "github.com/szatmary/gocaption"
