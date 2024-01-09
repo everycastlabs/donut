@@ -1,4 +1,4 @@
-package main
+package donut
 
 import (
 	"errors"
@@ -6,14 +6,12 @@ import (
 	"strconv"
 )
 
-func assertSignalingCorrect(SRTHost, SRTPort, SRTStreamID string) (int, error) {
+func assertSignalingCorrect(SRTHost, SRTPort string) (int, error) {
 	switch {
 	case SRTHost == "":
 		return 0, errors.New("SRTHost must not be nil")
 	case SRTPort == "":
 		return 0, errors.New("SRTPort must not be empty")
-	case SRTStreamID == "":
-		return 0, errors.New("SRTStreamID must not be empty")
 	}
 
 	return strconv.Atoi(SRTPort)

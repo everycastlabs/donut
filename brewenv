@@ -1,5 +1,5 @@
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/homebrew/Cellar/srt/1.5.1/lib"
-export CGO_CFLAGS="-I/opt/homebrew/Cellar/srt/1.5.1/include/"
-export CGO_LDFLAGS="-L/opt/homebrew/Cellar/srt/1.5.1/lib"
-export PKG_CONFIG_PATH="/opt/homebrew/Cellar/srt/1.5.1/lib/pkgconfig"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/homebrew/Cellar/srt/1.5.3/lib"
+export CGO_CFLAGS="-I/opt/homebrew/Cellar/srt/1.5.3/include/"
+export CGO_LDFLAGS="-L/opt/homebrew/Cellar/srt/1.5.3/lib"
+export PKG_CONFIG_PATH="/opt/homebrew/Cellar/srt/1.5.3/lib/pkgconfig"
 

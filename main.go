@@ -1,7 +1,7 @@
 //go:build !js
 // +build !js
 
-package main
+package donut
 
 import (
 	"context"
@@ -40,6 +40,10 @@ type SRTOffer struct {
 	SRTPort     string
 	SRTStreamID string
 	Offer       webrtc.SessionDescription
+}
+
+type InitParams struct {
+	OnBeforeAccept astisrt.ServerOnBeforeAccept
 }
 
 func srtToWebRTC(srtConnection *astisrt.Connection, videoTrack *webrtc.TrackLocalStaticSample, metadataTrack *webrtc.DataChannel) {
@@ -176,7 +180,7 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ICE Connection State has changed: %s\n", connectionState.String())
 	})
 
-	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
+	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort)
 	if err != nil {
 		errorToHTTP(w, err)
 		return
@@ -233,41 +237,42 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func listenAndWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
+func listenAndWhip(OnBeforeAcceptF astisrt.ServerOnBeforeAccept, srtUri string, a *webrtc.API) {
 	offer := parseToOffer(srtUri)
-	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
-	hand := astisrt.ServerHandlerFunc(func(c *astisrt.Connection) {
-		log.Println(" got new SRT on", offer.SRTHost, srtPort, offer.SRTStreamID)
-		sid, _ := c.Options().Streamid()
-		whip := NewWHIPClient(whipUri, token)
-		videoTrack := whip.Publish(a, peerConnectionConfiguration, sid)
-
-		ticker := time.NewTicker(20 * time.Second)
-		go func() {
-			for range ticker.C {
-				s, err := c.Stats(true, true)
-				b := s.ByteRecvUnique()
-				if b == 0 || err != nil {
-					log.Printf("timeout on  %s\n", sid)
-					c.Close()
-					whip.Close(true)
-					ticker.Stop()
-				}
-			}
-		}()
-		srtToWebRTC(c, videoTrack, nil)
-		whip.Close(true)
-	})
+	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort)
 	serv, err := astisrt.NewServer(
 		astisrt.ServerOptions{
 			ConnectionOptions: []astisrt.ConnectionOption{
-				astisrt.WithStreamid(offer.SRTStreamID),
 				astisrt.WithTranstype(astisrt.TranstypeLive),
 			},
-			Handler:        hand,
-			OnBeforeAccept: nil,
-			Host:           offer.SRTHost,
-			Port:           uint16(srtPort),
+			OnBeforeAccept: OnBeforeAcceptF,
+			Handler: astisrt.ServerHandlerFunc(func(c *astisrt.Connection) {
+				log.Println(" got new SRT on", offer.SRTHost, srtPort, offer.SRTStreamID)
+				sid, _ := c.Options().Streamid()
+				//ideally we'd get the whip uri and token from c
+
+				whip := NewWHIPClient(c.Context().Value("whipUri").(string), c.Context().Value("whipToken").(string))
+				videoTrack := whip.Publish(a, peerConnectionConfiguration, sid)
+
+				ticker := time.NewTicker(20 * time.Second)
+				go func() {
+					for range ticker.C {
+						s, err := c.Stats(true, true)
+						b := s.ByteRecvUnique()
+						if b == 0 || err != nil {
+							log.Printf("timeout on  %s\n", sid)
+							c.Close()
+							whip.Close(true)
+							ticker.Stop()
+						}
+					}
+				}()
+				srtToWebRTC(c, videoTrack, nil)
+				log.Printf("Closing Whip client due to exited srtToWebRTC")
+				whip.Close(true)
+			}),
+			Host: offer.SRTHost,
+			Port: uint16(srtPort),
 		})
 	if err != nil {
 		log.Fatal(err)
@@ -297,7 +302,7 @@ func doWhip(whipUri string, srtUri string, token string, a *webrtc.API) {
 	whip := NewWHIPClient(whipUri, token)
 	videoTrack := whip.Publish(a, peerConnectionConfiguration, "whipnut")
 	offer := parseToOffer(srtUri)
-	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort, offer.SRTStreamID)
+	srtPort, err := assertSignalingCorrect(offer.SRTHost, offer.SRTPort)
 	log.Println("Connecting to SRT ", offer.SRTHost, srtPort, offer.SRTStreamID)
 
 	srtConnection, err := astisrt.Dial(astisrt.DialOptions{
@@ -343,17 +348,101 @@ func parseToOffer(s string) SRTOffer {
 	}
 }
 
-func main() {
-	whipUri := flag.String("whip-uri", "", "whip URI to send stream to")
+func Start(params InitParams) {
 	srtUri := flag.String("srt-uri", "", "srt URI to use")
 
-	flag.BoolVar(&enableICEMux, "enable-ice-mux", false, "Enable ICE Mux on :8081")
+	flag.BoolVar(&enableICEMux, "enable-ice-mux", true, "Enable ICE Mux on :8081")
 	flag.Parse()
 
 	mediaEngine := &webrtc.MediaEngine{}
 	settingEngine := webrtc.SettingEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		log.Fatal(err)
+	// if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	const MimeTypeH264 = "video/H264"
+	const MimeTypeOpus = "audio/opus"
+
+	// Default Pion Audio Codecs
+	for _, codec := range []webrtc.RTPCodecParameters{
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
+			PayloadType:        111,
+		},
+	} {
+		if err := mediaEngine.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	videoRTCPFeedback := []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
+	for _, codec := range []webrtc.RTPCodecParameters{
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", videoRTCPFeedback},
+			PayloadType:        102,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=102", nil},
+			PayloadType:        103,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f", videoRTCPFeedback},
+			PayloadType:        104,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=104", nil},
+			PayloadType:        105,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", videoRTCPFeedback},
+			PayloadType:        106,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=106", nil},
+			PayloadType:        107,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f", videoRTCPFeedback},
+			PayloadType:        108,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=108", nil},
+			PayloadType:        109,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f", videoRTCPFeedback},
+			PayloadType:        127,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=127", nil},
+			PayloadType:        125,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=4d001f", videoRTCPFeedback},
+			PayloadType:        39,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=39", nil},
+			PayloadType:        40,
+		},
+
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f", videoRTCPFeedback},
+			PayloadType:        112,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=112", nil},
+			PayloadType:        113,
+		},
+	} {
+		if err := mediaEngine.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	if enableICEMux {
@@ -388,10 +477,8 @@ func main() {
 			},
 		}
 	}
-	if len(*whipUri) > 0 && len(*srtUri) > 0 {
-		token := flag.String("whip-token", "", "bearer token for whip")
-		log.Printf("WHIP mode - sending %s to %s \n ", *srtUri, *whipUri)
-		listenAndWhip(*whipUri, *srtUri, *token, api)
+	if params.OnBeforeAccept != nil {
+		listenAndWhip(params.OnBeforeAccept, *srtUri, api)
 	} else {
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(200)

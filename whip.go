@@ -1,13 +1,14 @@
-package main
+package donut
 
 import (
 	"bytes"
 	"crypto/tls"
-	"github.com/pion/webrtc/v3"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+
+	"github.com/pion/webrtc/v3"
 )
 
 type WHIPClient struct {
@@ -76,6 +77,7 @@ func (whip *WHIPClient) Publish(napi *webrtc.API, config webrtc.Configuration, s
 			},
 		},
 	}
+
 	req, err := http.NewRequest("POST", whip.endpoint, bytes.NewBuffer(sdp))
 	if err != nil {
 		log.Fatal("Unexpected error building http request. ", err)
